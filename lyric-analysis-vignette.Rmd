@@ -1,0 +1,380 @@
+---
+title: <center> <h1> lyric.analysis vignette </h1> </center>
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{lyric-analysis-vignette}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup}
+library(lyric.analysis)
+```
+
+
+```{r, include = FALSE}
+#loading all required packages
+install.packages("xml2", repos = "http://cran.us.r-project.org")
+install.packages("rvest", repos = "http://cran.us.r-project.org")
+install.packages("textclean", repos = "http://cran.us.r-project.org")
+install.packages("syuzhet", repos = "http://cran.us.r-project.org")
+install.packages("wordcloud", repos = "http://cran.us.r-project.org") #makes the wordcloud
+install.packages("RColorBrewer", repos = "http://cran.us.r-project.org") #color selection, not totally necessary but nice
+install.packages("tm", repos = "http://cran.us.r-project.org") #document term matrix
+install.packages("stringr", repos = "http://cran.us.r-project.org") #document term matrix
+library(rvest)
+library(xml2)
+library(stringr)
+library(textclean)
+library(syuzhet)
+library(wordcloud)
+library(RColorBrewer)
+library(tm)
+```
+
+# Contents
+
+- Introduction
+
+- Web Scraping and Formatting
+
+- Data Cleaning 
+
+- Text Analysis and Data Visualization
+
+
+## Introduction 
+
+  This package is called lyric.analysis. The package addresses three major challenges: lyric text data collection, lyric data formatting and cleaning, and lyric data exploration and visualization. For users who want to do text data analytics on song lyrics of a certain song or artist they can use our package to web scrape the lyrics from a website called www.songlyrics.com. This website has a very large amount of lyric data from a wide variety of artists and genres. So, lyrics from any artist or song that is available on www.songlyrics.com can be webscrapped using our package. 
+
+
+  Lyric.analysis also includes functions that will clean the text data once it is collected by removing punctuation, expanding contractions, or removing digits from the lyrics. The package also has a function that will format the raw html from the website into a more organized and useful format. 
+
+
+  To help users visualize the web scrapped song lyrics, the package contains functions that will create document term matrices and word clouds from text data that has been formatted and cleaned. There is also a function that returns the proportion of certain sentiments in a vector of lyrics to help users explore the data further.
+
+
+## Web Scraping and Formatting 
+
+In order to collect the unformatted lyric text data we use the functions getArtist() and getSong(). These functions use the arguments to construct a url from which we can access the HTML for the pages associated with the artist or an individual song. The getArtist() function returns lyrics and titles for all songs associated with a given artist, and the getSong() returns the unformatted lyric text data of an individual song and its title.
+
+
+The functions access the relevant HTML by either explicitly navigating the DOM (as in table > tr > a > href) or by searching for specific ID attributes amongst the elements (as in '#SongLyricsDiv'). In both cases the functionality is enabled by the [rvest](https://rvest.tidyverse.org/) package. 
+
+```{r, include=TRUE}
+getArtist <- function(artist){
+  artist <- tolower(gsub(" ","-", gsub("[().]","", gsub("'","-",artist))))
+  url <- paste('https://www.songlyrics.com/',artist,'-lyrics/', sep='')
+  
+  singer <- url %>% 
+    httr::GET(config = httr::config(ssl_verifypeer = TRUE)) %>% 
+    read_html() 
+  
+  track_links <<- singer %>%
+    html_nodes('table') %>% html_nodes('tr') %>% html_node('a') %>%
+    html_attr('href')
+  
+  track_links <<- track_links[1:(length(track_links) - 2)]
+  
+  lyricVector <- c()
+  songNameVector <- c()
+  
+  for(num in 1:length(track_links)){
+    track_url <- track_links[num]
+    song <- track_url %>%
+      httr::GET(config = httr::config(ssl_verifypeer = TRUE)) %>% 
+      read_html()  
+    songName <- song %>% html_elements('title') %>% html_text2()
+    lyrics <- song %>% html_elements('#songLyricsDiv') %>% html_text2()
+    songNameVector[num] <- songName
+    lyricVector[num] <- lyrics
+  }
+  lyrics <- cbind(lyricVector, songNameVector)
+  lyrics 
+}
+allSongs <- getArtist('Billie Eilish')
+
+getSong <- function(name, artist){
+  name <- tolower(gsub(" ","-", gsub("[().']","", gsub("'","-",name))))
+  artist <- gsub(" ", "-", artist)
+  url <- paste("https://www.songlyrics.com/",artist, "/", name, "-lyrics/", sep='')
+  track_url <-url
+  song <- track_url %>%
+    httr::GET(config = httr::config(ssl_verifypeer = TRUE)) %>%
+    read_html()
+  songName <- song %>% html_elements("title") %>% html_text2()
+  songlyrics <- song %>% html_elements('#songLyricsDiv') %>% html_text2()
+  lyrics <- cbind(songlyrics, songName)
+  lyrics
+}
+bellyAche <- getSong('Billie Eilish','bellyache')
+```
+
+
+## Data Cleaning 
+
+
+```{r, include=FALSE}
+getArtist <- function(artist){
+  artist <- tolower(gsub(" ","-", gsub("[().]","", gsub("'","-",artist))))
+  
+  url <- paste('https://www.songlyrics.com/',artist,'-lyrics/', sep='')
+  singer <- url %>% 
+    httr::GET(config = httr::config(ssl_verifypeer = TRUE)) %>% 
+    read_html() 
+  
+  track_links <<- singer %>%
+    html_nodes('table') %>% html_nodes('tr') %>% html_node('a') %>%
+    html_attr('href')
+  
+  track_links <<- track_links[1:(length(track_links) - 2)]
+  
+  lyricVector <- c()
+  songNameVector <- c()
+  for(num in 1:length(track_links)){
+    
+    track_url <- track_links[num]
+    song <- track_url %>%
+      httr::GET(config = httr::config(ssl_verifypeer = TRUE)) %>% 
+      read_html()  
+    songName <- song %>% html_elements('title') %>% html_text2()
+    lyrics <- song %>% html_elements('#songLyricsDiv') %>% html_text2()
+    songNameVector[num] <- songName
+    lyricVector[num] <- lyrics
+  }
+  lyrics <- cbind(lyricVector, songNameVector)
+  lyrics 
+}
+allSongs <- getArtist('Billie Eilish')
+```
+
+### Lyric Formatting
+After web scraping the lyrics using the getSong() and getArtist() functions, our lyrics are not in a useful format. To solve this problem, we will use the formatLyrics() function. This function takes in the web scraped lyrics and formats them into a three column dataframe consisting of lyrics, artist, and song title.
+
+#### formatLyrics()
+```{r, format lyrics function}
+formatLyrics <- function(lyrics){
+  list_mat <- list()
+  for(num in 1:length(lyrics[,1])){
+    a <- strsplit(lyrics[num,1], split = '\n')
+    a <- unlist(a)
+    
+    z <- rep(lyrics[num,2], length(a))
+    
+    f <- cbind(a,z)
+    
+    list_mat[[num]] <- f
+    
+  }
+  list_mat <- do.call(rbind, list_mat)
+  list_mat <- data.frame(list_mat)
+  
+  list_mat[c('artist','song title')] <- str_split_fixed(list_mat$z, ' - ', 2)
+  list_mat <- list_mat[c('a', 'artist', 'song title')]
+  
+  row.names(list_mat) <- NULL
+  
+  colnames(list_mat) <- c('lyrics', 'artist', 'song title')
+  
+  list_mat[,'lyrics'] <- sub('\r', "", list_mat[,'lyrics'])
+  list_mat
+}
+
+```
+
+Here we will show an example of how the formatLyrics() function works.
+
+```{r, format lyrics example}
+allLyrics <- formatLyrics(allSongs)
+head(allLyrics, 10)
+```
+
+
+Not only does this function format the lyrics into the correct data frame, but it also gets rid of the new line marker that is a result of the web scraping. 
+
+
+Now that we have the data frame, we need to address the empty rows of lyrics,the punctuation, digits, and contractions. To do this, we will use the cleanLyrics() function.
+
+#### cleanLyrics()
+```{r, clean lyrics function}
+cleanLyrics <- function(lyr, expContractions = FALSE){
+  
+  lyr <- lyr[!(lyr$lyrics == ""), ] #get rid of empty lyric rows
+  rownames(lyr) <- 1:nrow(lyr) # renumber index 
+  
+  for(row in 1:length(lyr[,1])){ # converts digits to words
+    lyr[row,1] <- replace_number(lyr[row,1])
+  }
+  
+  if(expContractions == TRUE){ 
+    for(row in 1:length(lyr[,1])){ # expands contractions
+      lyr[row,1] <- replace_contraction(lyr[row,1])
+    }
+  }
+  
+  for(row in 1:length(lyr[,1])){
+    lyr[row,1] <- str_replace_all(lyr[row,1], "[[:punct:]]", "")
+  }
+  
+  lyr
+}
+```
+
+Here we will show an example of how the cleanLyrics() function works. The function takes the formatted lyrics and an optional expContractions parameter. 
+
+
+If you want to expand contractions (e.g. expand "I'm" to "I am") then specify expContractions = TRUE, otherwise the default is FALSE. 
+
+Here we do want to expand contractions.
+
+```{r, clean lyrics example}
+allLyrics <- cleanLyrics(allLyrics, expContractions = TRUE)
+head(allLyrics, 10)
+```
+
+
+Now we have a clean data frame with no more empty rows, no punctuation, and expanded contractions. As you can see, we decided to leave in the rows that specify Verse 1, Chorus, etc. because we thought that might be helpful information for the user.
+
+
+## Text Analysis and Data Visualization 
+
+Now that we have scraped our song(s) and formatted/cleaned the data, we can move onto visualizations and analysis.
+
+The rest of the functions will take an input value of a formatted and cleaned data frame.
+
+```{r, include = FALSE}
+#get_dtm()
+get_dtm <- function(cleanedlyrics){
+  #making a document term matrix from the dataframe of cleaned lyrics 
+  dtm <- TermDocumentMatrix(cleanedlyrics[,1]) 
+  matrix <- as.matrix(dtm) 
+  words <- sort(rowSums(matrix),decreasing=TRUE) 
+  df <- data.frame(word = names(words),freq=words)
+}
+
+#sentimentProportion()
+sentimentProportion <- function(x){
+  sentimentMatrix <- get_nrc_sentiment(x)
+  proportions <- colSums(sentimentMatrix) / length(x)
+  proportions
+}
+
+#get_wordcloud()
+get_wordcloud <- function(cleanedlyrics = NULL, dtm = FALSE) {
+  if (dtm == TRUE) {
+    wc <- wordcloud(words = cleanedlyrics$word, freq = cleanedlyrics$freq, min.freq = 2, max.words = 200,
+                    random.order = FALSE, rot.per = 0.25, colors = brewer.pal(8, "Accent") )
+    return(invisible(wc))
+  }
+  
+  #making a document term matrix from the dataframe of cleaned lyrics
+  dtm <- TermDocumentMatrix(cleanedlyrics[, 1])
+  matrix <- as.matrix(dtm)
+  words <- sort(rowSums(matrix), decreasing = TRUE)
+  df <- data.frame(word = names(words), freq = words)
+  
+  #making the actual wordcloud using the wordcloud package
+  wc <- wordcloud(words = df$word, freq = df$freq, min.freq = 2, max.words = 200,
+            random.order = FALSE, rot.per = 0.25, colors = brewer.pal(8, "Accent") )
+  return(invisible(wc))
+}
+
+#top5words()
+top5words <- function(data, dtm = FALSE) {
+  #dtm or cleaned lyrics as input?
+  if (dtm == TRUE) {
+    #if input is already a DTM, do this
+    bp <- barplot(data$freq[1:5], names.arg = data$word[1:5], col = "peachpuff4")
+    return(invisible(bp))
+  }
+  
+  #otherwise, we need to make a dtm first
+  dtm <- TermDocumentMatrix(data[, 1])
+  matrix <- as.matrix(dtm)
+  words <- sort(rowSums(matrix), decreasing = TRUE)
+  df <- data.frame(word = names(words), freq = words)
+  
+  bp <- barplot(df$freq[1:5], names.arg = df$word[1:5], col = "peachpuff4")
+  return(invisible(bp))
+}
+
+```
+
+
+### Text Analysis 
+
+1. get_dtm() 
+	
+	This function provides the user with a Document Term Matrix. DTMs are data frames with two columns: one for each unique word in the data and one for its frequency. This function is not necessary as users can use the package without ever requiring it. However, if users want access to the raw frequency data this is a great method. This function uses package "tm" and takes one input value:
+	
+- data frame of formatted and cleaned lyrics, by formatLyrics() and cleanLyrics(). 
+
+```{r, get_dtm() example}
+#allLyrics, the data frame of formatted and cleaned lyrics from the previous section
+lyrics_dtm <- get_dtm(allLyrics)
+head(lyrics_dtm,10)
+```
+
+
+2. sentimentProportion()
+	
+	This function creates a list of the proportions of sentiments detected in the lyrics. This functions uses package "syuzhet" and takes one input value
+	
+- A vector of lyrics, or the column of lyrics from a data frame, of formatted and cleaned lyrics
+	
+```{r, warning=FALSE}
+sentimentProportion(allLyrics[,1])
+```
+
+
+### Data Visualization 
+
+1. get_wordcloud()
+  
+  This function was created with the simple goal of creating a wordcloud based off the lyrics the user indicates. This function uses packages "wordcloud", "RColorBrewer", and "tm" and uses two input values to create the visualization.
+
+- A data frame of lyrics formatted and cleaned by formatLyrics() and cleanLyrics(), or a document term matrix of lyrics. 
+- An optional boolean defaulted to false that indicates if the passed in dataframe is already a document term matrix. 
+
+
+```{r, warning = F}
+#using a data frame
+get_wordcloud(allLyrics)
+```
+```{r, warning = F}
+#using a DTM
+get_wordcloud(lyrics_dtm, dtm = TRUE)
+```
+
+
+2. top5words()
+	
+	This function was created with the goal of being a simple and easy tool to access the top five most used words in the dataset. It produces a barplot with five words and their respective frequencies. This function uses packages "tm". Similarly to get_wordcloud(), it takes two input values.
+	
+- A data frame of lyrics formatted and cleaned by formatLyrics() and cleanLyrics(), or a document term matrix of lyrics
+- An optional boolean defaulted to false which indicates if the passed in dataframe is already a document term matrix
+
+
+```{r, fig.width = 5, fig.height=5}
+#using a data frame
+top5words(allLyrics)
+```
+```{r, fig.width = 5, fig.height=5}
+#using a DTM
+top5words(lyrics_dtm, dtm = TRUE)
+```
+
+
+### Limitations
+
+- Input values are dependent on previous package functions formatLyrics() and cleanLyrics() 
+  - This dependence was designed on purpose to give the user a natural procedure to follow, but it could be seen as a limitation since the user needs to follow various steps before being able to use later-stage functions
+- Customization aspects of the wordcloud or barplot are not accessible to the user. The color, size, etc. settings cannot be changed. This was intended to make the package simpler, but could be seen as a downside
+- These functions are dependent on external packages to some extent which could cause issues if one of the packages fails
